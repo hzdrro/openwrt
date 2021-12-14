@@ -29,6 +29,9 @@ struct mtk_ppe_account_group {
 	unsigned long jiffies;
 	unsigned long long bytes;
 	unsigned long long packets;
+	unsigned int speed_bytes[4];
+	unsigned int speed_packets[4];
+	void *priv; /* for keepalive callback */
 };
 
 static struct mtk_ppe_account_group mtk_ppe_account_group_entry[64];
@@ -69,6 +72,7 @@ static void mtk_ppe_account_group_walk(struct timer_list *ignore)
 	unsigned long long bytes, packets;
 	struct mtk_ppe_account_group *ag;
 	struct mtk_eth *eth = (struct mtk_eth *)ag_timer_eth;
+	void (*func)(unsigned int, unsigned long, unsigned long, unsigned int *, unsigned int *, int);
 	for (i = 1; i < 64; i++) {
 		ag = mtk_ppe_account_group_get(i);
 		if (ag->state == FOE_STATE_BIND) {
@@ -79,6 +83,21 @@ static void mtk_ppe_account_group_walk(struct timer_list *ignore)
 				ag->jiffies = jiffies;
 				ag->bytes += bytes;
 				ag->packets += packets;
+			}
+			ag->speed_bytes[(jiffies/HZ) % 4] = (unsigned int)bytes;
+			ag->speed_packets[(jiffies/HZ) % 4] = (unsigned int)packets;
+
+			if ((func = ag->priv) != NULL && (((jiffies/HZ) % 2 == 0 && i % 2 == 0) || ((jiffies/HZ) % 2 == 1 && i % 2 == 1)) ) {
+				struct mtk_foe_entry *entry = &eth->foe_table[ag->hash];
+				if (entry->bfib1.state == BIND && bytes > 0 && packets > 0) {
+					bytes = ag->bytes;
+					packets = ag->packets;
+					func(ag->hash, bytes, packets, ag->speed_bytes, ag->speed_packets, 1);
+					ag->bytes = 0;
+					ag->packets = 0;
+				} else {
+					ag->priv = NULL;
+				}
 			}
 
 			//printk("hnat-walk-ag[%u]: hash=%u bytes=%llu packets=%llu\n", i, ag->hash, bytes, packets);
@@ -96,8 +115,20 @@ static void mtk_ppe_account_group_walk(struct timer_list *ignore)
 	mod_timer(&ag_timer, jiffies + HZ * 1);
 }
 
+static void mtk_ppe_account_group_walk_stop(void)
+{
+	u32 i;
+	struct mtk_ppe_account_group *ag;
+	for (i = 1; i < 64; i++) {
+		ag = mtk_ppe_account_group_get(i);
+		if (ag->state == FOE_STATE_BIND) {
+			ag->state = FOE_STATE_INVALID;
+		}
+	}
+}
+
 static u32
-mtk_flow_hash_v4(struct flow_offload_tuple *tuple)
+mtk_flow_hash_v4(flow_offload_tuple_t *tuple)
 {
 	u32 ports = ntohs(tuple->src_port)  << 16 | ntohs(tuple->dst_port);
 	u32 src = ntohl(tuple->dst_v4.s_addr);
@@ -116,10 +147,10 @@ mtk_flow_hash_v4(struct flow_offload_tuple *tuple)
 
 static int
 mtk_foe_prepare_v4(struct mtk_foe_entry *entry,
-		   struct flow_offload_tuple *tuple,
-		   struct flow_offload_tuple *dest_tuple,
-		   struct flow_offload_hw_path *src,
-		   struct flow_offload_hw_path *dest)
+		   flow_offload_tuple_t *tuple,
+		   flow_offload_tuple_t *dest_tuple,
+		   flow_offload_hw_path_t *src,
+		   flow_offload_hw_path_t *dest)
 {
 	int is_mcast = !!is_multicast_ether_addr(dest->eth_dest);
 
@@ -212,13 +243,13 @@ mtk_foe_write(struct mtk_eth *eth, u32 hash,
 }
 
 int mtk_flow_offload(struct mtk_eth *eth,
-		     enum flow_offload_type type,
-		     struct flow_offload *flow,
-		     struct flow_offload_hw_path *src,
-		     struct flow_offload_hw_path *dest)
+		     flow_offload_type_t type,
+		     flow_offload_t *flow,
+		     flow_offload_hw_path_t *src,
+		     flow_offload_hw_path_t *dest)
 {
-	struct flow_offload_tuple *otuple = &flow->tuplehash[FLOW_OFFLOAD_DIR_ORIGINAL].tuple;
-	struct flow_offload_tuple *rtuple = &flow->tuplehash[FLOW_OFFLOAD_DIR_REPLY].tuple;
+	flow_offload_tuple_t *otuple = &flow->tuplehash[FLOW_OFFLOAD_DIR_ORIGINAL].tuple;
+	flow_offload_tuple_t *rtuple = &flow->tuplehash[FLOW_OFFLOAD_DIR_REPLY].tuple;
 	u32 time_stamp = mtk_r32(eth, 0x0010) & (0x7fff);
 	u32 ohash, rhash;
 	struct mtk_foe_entry orig = {
@@ -312,12 +343,14 @@ int mtk_flow_offload(struct mtk_eth *eth,
 	ag_idx = orig.ipv4_hnapt.iblk2.port_ag;
 	ag = mtk_ppe_account_group_get(ag_idx);
 	if (ag) {
+		ag->priv = NULL;
 		ag->hash = ohash;
 		ag->state = FOE_STATE_BIND;
 	}
 	ag_idx = reply.ipv4_hnapt.iblk2.port_ag;
 	ag = mtk_ppe_account_group_get(ag_idx);
 	if (ag) {
+		ag->priv = NULL;
 		ag->hash = rhash;
 		ag->state = FOE_STATE_BIND;
 	}
@@ -331,6 +364,19 @@ int mtk_flow_offload(struct mtk_eth *eth,
 	*/
 
 	return 0;
+}
+
+void ra_flow_offload_stop(void)
+{
+	int i;
+	struct mtk_eth *eth = (struct mtk_eth *)ag_timer_eth;
+
+	if (eth) {
+		for (i = 0; i < MTK_PPE_ENTRY_CNT; i++) {
+			rcu_assign_pointer(eth->foe_flow_table[i], NULL);
+		}
+	}
+	mtk_ppe_account_group_walk_stop();
 }
 
 #ifdef CONFIG_NET_RALINK_HW_QOS
@@ -646,27 +692,30 @@ static int mtk_ppe_stop(struct mtk_eth *eth)
 
 static void mtk_offload_keepalive(struct fe_priv *eth, unsigned int hash)
 {
-	struct flow_offload *flow;
+	flow_offload_t *flow;
 
 	rcu_read_lock();
 	flow = rcu_dereference(eth->foe_flow_table[hash]);
 	if (flow) {
-		void (*func)(unsigned int, unsigned long long, unsigned long long);
+		void (*func)(unsigned int, unsigned long, unsigned long, unsigned int *, unsigned int *, int);
 		func = (void *)flow->priv;
 		if (func) {
 			struct mtk_foe_entry *entry = &eth->foe_table[hash];
 			u32 ag_idx = entry->ipv4_hnapt.iblk2.port_ag;
 			struct mtk_ppe_account_group *ag = mtk_ppe_account_group_get(ag_idx);
 			if (ag && ag->state == FOE_STATE_BIND && ag->hash == hash) {
-				unsigned long long bytes = ag->bytes;
-				unsigned long long packets = ag->packets;
-				func(hash, bytes, packets);
-				//printk("hnat-ag[%u]: hash=%u bytes=%llu packets=%llu\n", ag_idx, hash, bytes, packets);
-				ag->bytes -= bytes;
-				ag->packets -= packets;
-			} else {
-				func(hash, 0, 0);
+				if (ag->priv != func) {
+					unsigned long bytes = ag->bytes;
+					unsigned long packets = ag->packets;
+					func(hash, bytes, packets, ag->speed_bytes, ag->speed_packets, 1);
+					ag->bytes -= bytes;
+					ag->packets -= packets;
+					ag->priv = func;
+					rcu_read_unlock();
+					return;
+				}
 			}
+			func(hash, 0, 0, NULL, NULL, 1);
 		}
 	}
 	rcu_read_unlock();
