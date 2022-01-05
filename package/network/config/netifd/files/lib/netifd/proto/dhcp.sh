@@ -69,7 +69,7 @@ proto_dhcp_setup() {
 		-f -t 0 -i "$iface" \
 		${ipaddr:+-r $ipaddr} \
 		${hostname:+-x "hostname:$hostname"} \
-		${vendorid:+-V "$vendorid"} \
+		-V '' \
 		$clientid $defaultreqopts $broadcast $norelease $dhcpopts
 }
 
