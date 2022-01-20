@@ -101,6 +101,7 @@ platform_do_upgrade() {
 	netis,wf2881|\
 	raisecom,msg1500-x-00|\
 	sercomm,na502|\
+	xwrt,fm10-ax-nand|\
 	xwrt,wr1800k-ax-nand)
 		nand_do_upgrade "$1"
 		;;
