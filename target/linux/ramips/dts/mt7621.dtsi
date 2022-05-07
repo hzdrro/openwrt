@@ -723,4 +723,14 @@
 #endif
 		#phy-cells = <1>;
 	};
+	
+	crypto: crypto@1e004000 {
+	status = "okay";
+
+	compatible = "mediatek,mtk-eip93";
+	reg = <0x1e004000 0x1000>;
+
+	interrupt-parent = <&gic>;
+	interrupts = <GIC_SHARED 19 IRQ_TYPE_LEVEL_HIGH>;
+	};
 };
