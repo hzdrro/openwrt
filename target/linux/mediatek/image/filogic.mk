@@ -66,6 +66,24 @@ define Build/append-gl-metadata
 	}
 endef
 
+define Device/qihoo_360-t7
+  DEVICE_VENDOR := Qihoo
+  DEVICE_MODEL := 360 T7
+  DEVICE_DTS := mt7981b-qihoo-360-t7
+  DEVICE_DTS_DIR := ../dts
+  SUPPORTED_DEVICES += 360,t7
+  DEVICE_PACKAGES := kmod-mt7981-firmware mt7981-wo-firmware
+  UBINIZE_OPTS := -E 5
+  BLOCKSIZE := 128k
+  PAGESIZE := 2048
+  IMAGE_SIZE := 110592k
+  KERNEL_IN_UBI := 1
+  IMAGES := factory.img sysupgrade.tar
+  IMAGE/factory.img := append-ubi | check-size $$$$(IMAGE_SIZE)
+  IMAGE/sysupgrade.tar := sysupgrade-tar | append-metadata
+endef
+TARGET_DEVICES += qihoo_360-t7
+
 define Device/asus_tuf-ax4200
   DEVICE_VENDOR := ASUS
   DEVICE_MODEL := TUF-AX4200

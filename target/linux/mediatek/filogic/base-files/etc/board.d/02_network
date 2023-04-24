@@ -8,6 +8,9 @@ mediatek_setup_interfaces()
 	local board="$1"
 
 	case $board in
+	360,t7)
+		ucidef_set_interfaces_lan_wan "lan1 lan2 lan3" wan
+		;;
 	asus,tuf-ax4200)
 		ucidef_set_interfaces_lan_wan "lan1 lan2 lan3 lan4" eth1
 		;;
@@ -49,6 +52,10 @@ mediatek_setup_macs()
 	local label_mac=""
 
 	case $board in
+	360,t7)
+		lan_mac=$(macaddr_add $(mtd_get_mac_binary "Factory" 0x4) -2)
+		label_mac="$lan_mac"
+		;;
 	asus,tuf-ax4200)
 		CI_UBIPART="UBI_DEV"
 		addr=$(mtd_get_mac_binary_ubi "Factory" 0x4)
