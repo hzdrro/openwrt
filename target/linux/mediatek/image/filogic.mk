@@ -1112,7 +1112,7 @@ define Device/qihoo_360t7-ubootmod
   DEVICE_VARIANT := (custom U-Boot layout)
   DEVICE_DTS := mt7981b-qihoo-360t7-ubootmod
   DEVICE_DTS_DIR := ../dts
-  DEVICE_PACKAGES := kmod-mt7981-firmware mt7981-wo-firmware
+  DEVICE_PACKAGES := kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware
   SUPPORTED_DEVICES += qihoo,360-t7-ubootmod
   UBINIZE_OPTS := -E 5
   BLOCKSIZE := 128k
