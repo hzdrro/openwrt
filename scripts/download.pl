@@ -307,8 +307,8 @@ foreach my $mirror (@ARGV) {
 	}
 }
 
-projectsmirrors '@IMMORTALWRT';
 projectsmirrors '@OPENWRT';
+projectsmirrors '@IMMORTALWRT';
 
 if (-f "$target/$filename") {
 	$hash_cmd and do {
